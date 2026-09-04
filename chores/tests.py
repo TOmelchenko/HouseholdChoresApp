@@ -325,6 +325,224 @@ class CompleteChoreViewTest(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class MyChoresRecentlyCompletedTest(TestCase):
+    def setUp(self):
+        self.household = Household.objects.create()
+        self.roommate = Roommate.objects.create(household=self.household, name="Alice")
+        self.chore = Chore.objects.create(name="Dishes", frequency_days=1)
+
+    def _login(self, household=None, roommate=None):
+        household = household or self.household
+        roommate = roommate or self.roommate
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+    def test_recently_completed_section_absent_when_nothing_to_show(self):
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertNotContains(response, "Recently completed")
+
+    def test_recently_completed_section_shown_within_window(self):
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "Recently completed")
+        self.assertContains(response, "Dishes")
+        self.assertContains(response, "Undo")
+
+    def test_recently_completed_excludes_completions_older_than_5_minutes(self):
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now() - datetime.timedelta(minutes=6),
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertNotContains(response, "Recently completed")
+
+    def test_recently_completed_ordered_most_recent_first(self):
+        older = Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now() - datetime.timedelta(minutes=2),
+        )
+        chore2 = Chore.objects.create(name="Laundry", frequency_days=7)
+        newer = Assignment.objects.create(
+            chore=chore2,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now() - datetime.timedelta(minutes=1),
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        content = response.content.decode()
+        laundry_pos = content.find("Laundry")
+        dishes_pos = content.find("Dishes")
+        self.assertLess(laundry_pos, dishes_pos)
+
+
+class UndoChoreViewTest(TestCase):
+    def setUp(self):
+        self.household = Household.objects.create()
+        self.roommate = Roommate.objects.create(household=self.household, name="Alice")
+        self.chore = Chore.objects.create(name="Dishes", frequency_days=1)
+        self.assignment = Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+
+    def _login(self, household=None, roommate=None):
+        household = household or self.household
+        roommate = roommate or self.roommate
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+    def test_undo_within_window_clears_completed_at_and_redirects(self):
+        self._login()
+
+        response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertRedirects(response, "/chores/")
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.completed_at)
+
+    def test_undo_moves_assignment_back_to_pending_list(self):
+        self._login()
+
+        self.client.post(f"/chores/{self.assignment.id}/undo/")
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "Dishes")
+        self.assertNotContains(response, "Recently completed")
+
+    def test_undo_after_5_minute_window_is_noop(self):
+        self.assignment.completed_at = timezone.now() - datetime.timedelta(minutes=5, seconds=1)
+        self.assignment.save(update_fields=["completed_at"])
+        self._login()
+        original_completed_at = self.assignment.completed_at
+
+        response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertRedirects(response, "/chores/")
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.completed_at, original_completed_at)
+
+    def test_undo_other_roommates_assignment_returns_404_and_unchanged(self):
+        other_roommate = Roommate.objects.create(household=self.household, name="Bob")
+        other_assignment = Assignment.objects.create(
+            chore=self.chore,
+            roommate=other_roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.post(f"/chores/{other_assignment.id}/undo/")
+
+        self.assertEqual(response.status_code, 404)
+        other_assignment.refresh_from_db()
+        self.assertIsNotNone(other_assignment.completed_at)
+
+    def test_undo_other_households_assignment_returns_404_and_unchanged(self):
+        other_household = Household.objects.create()
+        other_roommate = Roommate.objects.create(household=other_household, name="Carol")
+        other_assignment = Assignment.objects.create(
+            chore=self.chore,
+            roommate=other_roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.post(f"/chores/{other_assignment.id}/undo/")
+
+        self.assertEqual(response.status_code, 404)
+        other_assignment.refresh_from_db()
+        self.assertIsNotNone(other_assignment.completed_at)
+
+    def test_undo_nonexistent_assignment_returns_404(self):
+        self._login()
+
+        response = self.client.post("/chores/9999/undo/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_request_returns_405_and_does_not_change_completed_at(self):
+        self._login()
+
+        response = self.client.get(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertEqual(response.status_code, 405)
+        self.assignment.refresh_from_db()
+        self.assertIsNotNone(self.assignment.completed_at)
+
+    def test_double_post_undo_is_idempotent(self):
+        self._login()
+
+        first_response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.completed_at)
+
+        second_response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertRedirects(second_response, "/chores/")
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.completed_at)
+
+    def test_no_session_redirects_to_index(self):
+        response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertRedirects(response, "/")
+        self.assignment.refresh_from_db()
+        self.assertIsNotNone(self.assignment.completed_at)
+
+    def test_stale_session_redirects_to_index_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = 9999
+        session["roommate_id"] = 9999
+        session.save()
+
+        response = self.client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_missing_csrf_token_returns_403(self):
+        self._login()
+        csrf_client = self.client_class(enforce_csrf_checks=True)
+        session = csrf_client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = self.roommate.id
+        session.save()
+
+        response = csrf_client.post(f"/chores/{self.assignment.id}/undo/")
+
+        self.assertEqual(response.status_code, 403)
+
+
 class CreateHouseholdViewTest(TestCase):
     def test_get_renders_form(self):
         response = self.client.get("/create/")

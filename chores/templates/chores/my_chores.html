@@ -25,5 +25,19 @@
   {% else %}
     <p>No chores right now.</p>
   {% endif %}
+  {% if recently_completed %}
+    <h2>Recently completed</h2>
+    <ul>
+      {% for assignment in recently_completed %}
+        <li>
+          {{ assignment.chore.name }}
+          <form method="post" action="{% url 'undo_chore' assignment.id %}">
+            {% csrf_token %}
+            <button type="submit">Undo</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
 </body>
 </html>

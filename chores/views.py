@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -47,10 +49,19 @@ def my_chores(request):
         roommate_id=roommate_id, completed_at__isnull=True
     ).select_related("chore").order_by("due_date")
 
+    recently_completed = Assignment.objects.filter(
+        roommate_id=roommate_id,
+        completed_at__gte=timezone.now() - timedelta(minutes=5),
+    ).select_related("chore").order_by("-completed_at")
+
     return render(
         request,
         "chores/my_chores.html",
-        {"assignments": assignments, "today": timezone.localdate()},
+        {
+            "assignments": assignments,
+            "today": timezone.localdate(),
+            "recently_completed": recently_completed,
+        },
     )
 
 
@@ -78,6 +89,35 @@ def complete_chore(request, assignment_id):
 
     if assignment.completed_at is None:
         assignment.completed_at = timezone.now()
+        assignment.save(update_fields=["completed_at"])
+
+    return redirect("my_chores")
+
+
+@require_POST
+def undo_chore(request, assignment_id):
+    household_id = request.session.get("household_id")
+    roommate_id = request.session.get("roommate_id")
+
+    if household_id is None or roommate_id is None:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Household.objects.filter(id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Roommate.objects.filter(id=roommate_id, household_id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    assignment = get_object_or_404(Assignment, id=assignment_id, roommate_id=roommate_id)
+
+    if assignment.completed_at is not None and assignment.completed_at >= timezone.now() - timedelta(minutes=5):
+        assignment.completed_at = None
         assignment.save(update_fields=["completed_at"])
 
     return redirect("my_chores")
