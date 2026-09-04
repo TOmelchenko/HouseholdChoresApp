@@ -1,6 +1,12 @@
 # Claude Code local settings
 .claude/
 
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+db.sqlite3
+
 # macOS
 .DS_Store
 .AppleDouble
