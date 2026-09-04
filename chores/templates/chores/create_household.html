@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Create household</title>
+</head>
+<body>
+  <h1>Create a new household</h1>
+  <form method="post">
+    {% csrf_token %}
+    <label for="name">Your name</label>
+    <input id="name" name="name" type="text" required autofocus>
+    <button type="submit">Create household</button>
+  </form>
+</body>
+</html>
