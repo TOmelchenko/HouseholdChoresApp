@@ -202,6 +202,129 @@ class MyChoresViewTest(TestCase):
         self.assertContains(response, "No chores right now")
 
 
+class CompleteChoreViewTest(TestCase):
+    def setUp(self):
+        self.household = Household.objects.create()
+        self.roommate = Roommate.objects.create(household=self.household, name="Alice")
+        self.chore = Chore.objects.create(name="Dishes", frequency_days=1)
+        self.assignment = Assignment.objects.create(
+            chore=self.chore, roommate=self.roommate, due_date=timezone.localdate()
+        )
+
+    def _login(self, household=None, roommate=None):
+        household = household or self.household
+        roommate = roommate or self.roommate
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+    def test_post_completes_assignment_and_redirects(self):
+        self._login()
+
+        response = self.client.post(f"/chores/{self.assignment.id}/complete/")
+
+        self.assertRedirects(response, "/chores/")
+        self.assignment.refresh_from_db()
+        self.assertIsNotNone(self.assignment.completed_at)
+
+    def test_completed_assignment_no_longer_in_my_chores(self):
+        self._login()
+
+        self.client.post(f"/chores/{self.assignment.id}/complete/")
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "No chores right now")
+
+    def test_get_request_returns_405_and_does_not_complete(self):
+        self._login()
+
+        response = self.client.get(f"/chores/{self.assignment.id}/complete/")
+
+        self.assertEqual(response.status_code, 405)
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.completed_at)
+
+    def test_nonexistent_assignment_returns_404(self):
+        self._login()
+
+        response = self.client.post("/chores/9999/complete/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_roommates_assignment_returns_404_and_unchanged(self):
+        other_roommate = Roommate.objects.create(household=self.household, name="Bob")
+        other_assignment = Assignment.objects.create(
+            chore=self.chore, roommate=other_roommate, due_date=timezone.localdate()
+        )
+        self._login()
+
+        response = self.client.post(f"/chores/{other_assignment.id}/complete/")
+
+        self.assertEqual(response.status_code, 404)
+        other_assignment.refresh_from_db()
+        self.assertIsNone(other_assignment.completed_at)
+
+    def test_other_households_assignment_returns_404_and_unchanged(self):
+        other_household = Household.objects.create()
+        other_roommate = Roommate.objects.create(household=other_household, name="Carol")
+        other_assignment = Assignment.objects.create(
+            chore=self.chore, roommate=other_roommate, due_date=timezone.localdate()
+        )
+        self._login()
+
+        response = self.client.post(f"/chores/{other_assignment.id}/complete/")
+
+        self.assertEqual(response.status_code, 404)
+        other_assignment.refresh_from_db()
+        self.assertIsNone(other_assignment.completed_at)
+
+    def test_double_post_is_idempotent_and_keeps_original_timestamp(self):
+        self._login()
+
+        first_response = self.client.post(f"/chores/{self.assignment.id}/complete/")
+        self.assignment.refresh_from_db()
+        first_completed_at = self.assignment.completed_at
+
+        second_response = self.client.post(f"/chores/{self.assignment.id}/complete/")
+        self.assignment.refresh_from_db()
+
+        self.assertRedirects(second_response, "/chores/")
+        self.assertEqual(self.assignment.completed_at, first_completed_at)
+
+    def test_no_session_redirects_to_index(self):
+        response = self.client.post(f"/chores/{self.assignment.id}/complete/")
+
+        self.assertRedirects(response, "/")
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.completed_at)
+
+    def test_stale_session_redirects_to_index_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = 9999
+        session["roommate_id"] = 9999
+        session.save()
+
+        response = self.client.post(f"/chores/{self.assignment.id}/complete/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_missing_csrf_token_returns_403(self):
+        self._login()
+        csrf_client = self.client_class(enforce_csrf_checks=True)
+        session = csrf_client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = self.roommate.id
+        session.save()
+
+        response = csrf_client.post(f"/chores/{self.assignment.id}/complete/")
+
+        self.assertEqual(response.status_code, 403)
+
+
 class CreateHouseholdViewTest(TestCase):
     def test_get_renders_form(self):
         response = self.client.get("/create/")

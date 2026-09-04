@@ -1,5 +1,6 @@
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from .models import Assignment, Household, Roommate
 
@@ -51,6 +52,35 @@ def my_chores(request):
         "chores/my_chores.html",
         {"assignments": assignments, "today": timezone.localdate()},
     )
+
+
+@require_POST
+def complete_chore(request, assignment_id):
+    household_id = request.session.get("household_id")
+    roommate_id = request.session.get("roommate_id")
+
+    if household_id is None or roommate_id is None:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Household.objects.filter(id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Roommate.objects.filter(id=roommate_id, household_id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    assignment = get_object_or_404(Assignment, id=assignment_id, roommate_id=roommate_id)
+
+    if assignment.completed_at is None:
+        assignment.completed_at = timezone.now()
+        assignment.save(update_fields=["completed_at"])
+
+    return redirect("my_chores")
 
 
 def create_household(request):

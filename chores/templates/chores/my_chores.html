@@ -15,6 +15,10 @@
         <li{% if assignment.due_date < today %} class="overdue"{% endif %}>
           {{ assignment.chore.name }} — due {{ assignment.due_date }}
           {% if assignment.due_date < today %}<span class="overdue"> (Overdue)</span>{% endif %}
+          <form method="post" action="{% url 'complete_chore' assignment.id %}">
+            {% csrf_token %}
+            <button type="submit">Done</button>
+          </form>
         </li>
       {% endfor %}
     </ul>
