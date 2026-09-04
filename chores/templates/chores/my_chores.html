@@ -3,8 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <title>My chores</title>
+  <style>
+    .overdue { color: red; font-weight: bold; }
+  </style>
 </head>
 <body>
-  <h1>Chores coming soon</h1>
+  <h1>My chores</h1>
+  {% if assignments %}
+    <ul>
+      {% for assignment in assignments %}
+        <li{% if assignment.due_date < today %} class="overdue"{% endif %}>
+          {{ assignment.chore.name }} — due {{ assignment.due_date }}
+          {% if assignment.due_date < today %}<span class="overdue"> (Overdue)</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No chores right now.</p>
+  {% endif %}
 </body>
 </html>

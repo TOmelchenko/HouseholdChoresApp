@@ -1,6 +1,9 @@
-from django.test import TestCase
+import datetime
 
-from .models import Household, Roommate
+from django.test import TestCase
+from django.utils import timezone
+
+from .models import Assignment, Chore, Household, Roommate
 
 
 class SmokeTest(TestCase):
@@ -57,10 +60,146 @@ class IndexViewTest(TestCase):
 
 
 class MyChoresViewTest(TestCase):
-    def test_get_renders_placeholder_page(self):
+    def setUp(self):
+        self.household = Household.objects.create()
+        self.roommate = Roommate.objects.create(household=self.household, name="Alice")
+        self.chore = Chore.objects.create(name="Dishes", frequency_days=1)
+
+    def _login(self, household=None, roommate=None):
+        household = household or self.household
+        roommate = roommate or self.roommate
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+    def test_no_session_redirects_to_index(self):
         response = self.client.get("/chores/")
+        self.assertRedirects(response, "/")
+
+    def test_invalid_household_id_redirects_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = 9999
+        session["roommate_id"] = self.roommate.id
+        session.save()
+
+        response = self.client.get("/chores/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_invalid_roommate_id_redirects_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = 9999
+        session.save()
+
+        response = self.client.get("/chores/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_roommate_household_mismatch_redirects_and_clears_session(self):
+        other_household = Household.objects.create()
+        other_roommate = Roommate.objects.create(household=other_household, name="Bob")
+        session = self.client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = other_roommate.id
+        session.save()
+
+        response = self.client.get("/chores/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_zero_incomplete_assignments_shows_empty_state(self):
+        self._login()
+
+        response = self.client.get("/chores/")
+
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Chores coming soon")
+        self.assertContains(response, "No chores right now")
+
+    def test_valid_session_lists_incomplete_assignments_sorted_by_due_date(self):
+        today = timezone.localdate()
+        chore2 = Chore.objects.create(name="Laundry", frequency_days=7)
+        Assignment.objects.create(
+            chore=chore2, roommate=self.roommate, due_date=today + datetime.timedelta(days=5)
+        )
+        Assignment.objects.create(
+            chore=self.chore, roommate=self.roommate, due_date=today - datetime.timedelta(days=1)
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Dishes")
+        self.assertContains(response, "Laundry")
+        dishes_pos = response.content.decode().find("Dishes")
+        laundry_pos = response.content.decode().find("Laundry")
+        self.assertLess(dishes_pos, laundry_pos)
+
+    def test_overdue_assignment_is_flagged(self):
+        today = timezone.localdate()
+        Assignment.objects.create(
+            chore=self.chore, roommate=self.roommate, due_date=today - datetime.timedelta(days=1)
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "Overdue")
+
+    def test_due_today_assignment_is_not_flagged_overdue(self):
+        today = timezone.localdate()
+        Assignment.objects.create(chore=self.chore, roommate=self.roommate, due_date=today)
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertNotContains(response, "Overdue")
+
+    def test_completed_assignment_excluded(self):
+        today = timezone.localdate()
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=today,
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "No chores right now")
+
+    def test_other_roommate_assignment_excluded(self):
+        other_roommate = Roommate.objects.create(household=self.household, name="Bob")
+        today = timezone.localdate()
+        Assignment.objects.create(chore=self.chore, roommate=other_roommate, due_date=today)
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "No chores right now")
+
+    def test_other_household_assignment_excluded(self):
+        other_household = Household.objects.create()
+        other_roommate = Roommate.objects.create(household=other_household, name="Carol")
+        today = timezone.localdate()
+        Assignment.objects.create(chore=self.chore, roommate=other_roommate, due_date=today)
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "No chores right now")
 
 
 class CreateHouseholdViewTest(TestCase):

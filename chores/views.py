@@ -1,6 +1,7 @@
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
-from .models import Household, Roommate
+from .models import Assignment, Household, Roommate
 
 
 def index(request):
@@ -23,7 +24,33 @@ def index(request):
 
 
 def my_chores(request):
-    return render(request, "chores/my_chores.html")
+    household_id = request.session.get("household_id")
+    roommate_id = request.session.get("roommate_id")
+
+    if household_id is None or roommate_id is None:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Household.objects.filter(id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Roommate.objects.filter(id=roommate_id, household_id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    assignments = Assignment.objects.filter(
+        roommate_id=roommate_id, completed_at__isnull=True
+    ).select_related("chore").order_by("due_date")
+
+    return render(
+        request,
+        "chores/my_chores.html",
+        {"assignments": assignments, "today": timezone.localdate()},
+    )
 
 
 def create_household(request):
