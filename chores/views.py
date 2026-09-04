@@ -1,6 +1,29 @@
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 
 from .models import Household, Roommate
+
+
+def index(request):
+    household_id = request.session.get("household_id")
+    roommate_id = request.session.get("roommate_id")
+
+    if household_id is not None and roommate_id is not None:
+        try:
+            Household.objects.get(id=household_id)
+        except Household.DoesNotExist:
+            pass
+        else:
+            return redirect("my_chores")
+
+    if household_id is not None or roommate_id is not None:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+
+    return render(request, "chores/landing.html")
+
+
+def my_chores(request):
+    return render(request, "chores/my_chores.html")
 
 
 def create_household(request):

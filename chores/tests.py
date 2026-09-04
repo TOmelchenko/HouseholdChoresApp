@@ -8,6 +8,61 @@ class SmokeTest(TestCase):
         self.assertTrue(True)
 
 
+class IndexViewTest(TestCase):
+    def test_empty_session_shows_landing_page(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Create household")
+        self.assertContains(response, "Join household")
+
+    def test_valid_session_redirects_to_my_chores(self):
+        household = Household.objects.create()
+        roommate = Roommate.objects.create(household=household, name="Alice")
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+        response = self.client.get("/")
+
+        self.assertRedirects(response, "/chores/")
+
+    def test_stale_household_id_clears_session_and_shows_landing_page(self):
+        session = self.client.session
+        session["household_id"] = 9999
+        session["roommate_id"] = 9999
+        session.save()
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Create household")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_partial_session_missing_roommate_id_shows_landing_page(self):
+        household = Household.objects.create()
+        session = self.client.session
+        session["household_id"] = household.id
+        session.save()
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Create household")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+
+class MyChoresViewTest(TestCase):
+    def test_get_renders_placeholder_page(self):
+        response = self.client.get("/chores/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Chores coming soon")
+
+
 class CreateHouseholdViewTest(TestCase):
     def test_get_renders_form(self):
         response = self.client.get("/create/")
