@@ -8,7 +8,7 @@ A shared household chores management app that fairly distributes recurring chore
 - Other roommates join using a shared household code
 - Predefined chores are automatically assigned using a rotation that balances both **number of turns** and **total effort**
 - Each roommate sees only their own chores and due dates
-- Chores are completed with a single tap
+- Chores are completed with a single click
 
 ## Key Features
 
