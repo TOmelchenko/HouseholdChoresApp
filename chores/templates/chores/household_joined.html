@@ -5,7 +5,11 @@
   <title>Joined household</title>
 </head>
 <body>
+  {% if is_returning %}
+  <h1>Welcome back, {{ roommate.name }}!</h1>
+  {% else %}
   <h1>Welcome, {{ roommate.name }}!</h1>
+  {% endif %}
   <p>You have joined household <strong>{{ household.code }}</strong>.</p>
 </body>
 </html>

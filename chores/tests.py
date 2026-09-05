@@ -604,3 +604,58 @@ class JoinHouseholdViewTest(TestCase):
     def test_post_code_lookup_is_case_insensitive(self):
         response = self.client.post("/join/", {"code": self.household.code.lower(), "name": "Bob"})
         self.assertEqual(Roommate.objects.count(), 1)
+
+    def test_post_with_matching_name_resumes_existing_roommate(self):
+        existing = Roommate.objects.create(household=self.household, name="Bob")
+
+        response = self.client.post("/join/", {"code": self.household.code, "name": "Bob"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Roommate.objects.count(), 1)
+        self.assertContains(response, "Welcome back, Bob!")
+        session = self.client.session
+        self.assertEqual(session["roommate_id"], existing.id)
+
+    def test_post_with_matching_name_case_insensitive_resumes_existing_roommate(self):
+        existing = Roommate.objects.create(household=self.household, name="Bob")
+
+        response = self.client.post("/join/", {"code": self.household.code, "name": "BOB"})
+
+        self.assertEqual(Roommate.objects.count(), 1)
+        session = self.client.session
+        self.assertEqual(session["roommate_id"], existing.id)
+        self.assertContains(response, "Welcome back, Bob!")
+
+    def test_post_with_matching_name_whitespace_resumes_existing_roommate(self):
+        existing = Roommate.objects.create(household=self.household, name="Bob")
+
+        response = self.client.post("/join/", {"code": self.household.code, "name": " Bob "})
+
+        self.assertEqual(Roommate.objects.count(), 1)
+        session = self.client.session
+        self.assertEqual(session["roommate_id"], existing.id)
+        self.assertContains(response, "Welcome back, Bob!")
+
+    def test_post_with_non_matching_name_creates_new_roommate(self):
+        Roommate.objects.create(household=self.household, name="Bob")
+
+        response = self.client.post("/join/", {"code": self.household.code, "name": "Carol"})
+
+        self.assertEqual(Roommate.objects.count(), 2)
+        new_roommate = Roommate.objects.get(name="Carol")
+        session = self.client.session
+        self.assertEqual(session["roommate_id"], new_roommate.id)
+        self.assertContains(response, "Welcome, Carol!")
+        self.assertNotContains(response, "Welcome back")
+
+    def test_post_with_multiple_matching_names_resumes_lowest_id(self):
+        first = Roommate.objects.create(household=self.household, name="Bob")
+        Roommate.objects.create(household=self.household, name="Bob")
+
+        response = self.client.post("/join/", {"code": self.household.code, "name": "Bob"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Roommate.objects.count(), 2)
+        session = self.client.session
+        self.assertEqual(session["roommate_id"], first.id)
+        self.assertContains(response, "Welcome back, Bob!")

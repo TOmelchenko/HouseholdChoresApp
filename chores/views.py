@@ -146,8 +146,20 @@ def join_household(request):
             except Household.DoesNotExist:
                 error = "No household found with that code."
             else:
-                roommate = Roommate.objects.create(household=household, name=name)
+                existing = Roommate.objects.filter(
+                    household=household, name__iexact=name
+                ).order_by("id").first()
+                if existing is not None:
+                    roommate = existing
+                    is_returning = True
+                else:
+                    roommate = Roommate.objects.create(household=household, name=name)
+                    is_returning = False
                 request.session["household_id"] = household.id
                 request.session["roommate_id"] = roommate.id
-                return render(request, "chores/household_joined.html", {"household": household, "roommate": roommate})
+                return render(
+                    request,
+                    "chores/household_joined.html",
+                    {"household": household, "roommate": roommate, "is_returning": is_returning},
+                )
     return render(request, "chores/join_household.html", {"error": error})
