@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -150,16 +151,36 @@ def join_household(request):
                 error = "No household found with that code."
             else:
                 # Case-insensitive, trimmed match resumes the existing roommate instead of
-                # creating a duplicate identity; no DB-level uniqueness constraint (see #17/#18).
-                existing = Roommate.objects.filter(
-                    household=household, name__iexact=name
-                ).order_by("id").first()
-                if existing is not None:
-                    roommate = existing
+                # creating a duplicate identity (see #16/#17). The household row is locked
+                # for the duration of the check-then-create so two concurrent requests for
+                # the same brand-new name serialize instead of racing (see #18). On SQLite
+                # select_for_update() has no row-level effect, so the Roommate.name
+                # case-insensitive unique constraint is the backstop that actually catches
+                # a race that slips through; a loser that hits it simply resumes the
+                # winner's newly-created roommate instead of surfacing an IntegrityError.
+                try:
+                    with transaction.atomic():
+                        household = Household.objects.select_for_update().get(
+                            pk=household.pk
+                        )
+                        existing = Roommate.objects.filter(
+                            household=household, name__iexact=name
+                        ).order_by("id").first()
+                        if existing is not None:
+                            roommate = existing
+                            is_returning = True
+                        else:
+                            roommate = Roommate.objects.create(
+                                household=household, name=name
+                            )
+                            is_returning = False
+                except IntegrityError:
+                    # Lost the race: another request committed a roommate with the same
+                    # case-insensitive name for this household first. Resume it.
+                    roommate = Roommate.objects.filter(
+                        household=household, name__iexact=name
+                    ).order_by("id").first()
                     is_returning = True
-                else:
-                    roommate = Roommate.objects.create(household=household, name=name)
-                    is_returning = False
                 request.session["household_id"] = household.id
                 request.session["roommate_id"] = roommate.id
                 return render(

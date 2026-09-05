@@ -1,6 +1,9 @@
 import datetime
+import threading
+from unittest import mock
 
-from django.test import TestCase
+from django.db import IntegrityError, transaction
+from django.test import Client, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from .models import Assignment, Chore, Household, Roommate
@@ -664,14 +667,117 @@ class JoinHouseholdViewTest(TestCase):
         self.assertContains(response, "Welcome, Carol!")
         self.assertNotContains(response, "Welcome back")
 
-    def test_post_with_multiple_matching_names_resumes_lowest_id(self):
-        first = Roommate.objects.create(household=self.household, name="Bob")
+    def test_creating_second_case_insensitive_duplicate_name_violates_db_constraint(self):
+        # Superseded by #18: this used to construct two pre-existing "Bob" rows
+        # directly via the ORM to exercise join_household's "resume the lowest
+        # id among matches" fallback for legacy duplicate data. The DB-level,
+        # case-insensitive backstop constraint added in #18 to close the
+        # concurrent-join race (see JoinHouseholdRaceTest) makes that scenario
+        # permanently impossible to construct -- any second case-insensitive
+        # same-name Roommate in the same household now fails at the DB layer,
+        # which this test verifies instead.
         Roommate.objects.create(household=self.household, name="Bob")
 
-        response = self.client.post("/join/", {"code": self.household.code, "name": "Bob"})
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Roommate.objects.create(household=self.household, name="bob")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(Roommate.objects.count(), 2)
-        session = self.client.session
-        self.assertEqual(session["roommate_id"], first.id)
-        self.assertContains(response, "Welcome back, Bob!")
+        self.assertEqual(Roommate.objects.count(), 1)
+
+
+class _FrozenLookup:
+    """Stands in for a Roommate queryset whose result was captured earlier, so
+    `.order_by(...).first()` replays that frozen answer instead of re-querying
+    the (by-then-changed) database."""
+
+    def __init__(self, frozen_first):
+        self._frozen_first = frozen_first
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return self._frozen_first
+
+
+class JoinHouseholdRaceTest(TransactionTestCase):
+    """Covers #18: two simultaneous joins with the same brand-new name must not
+    create two Roommate rows, and the loser must resume rather than crash.
+
+    Uses TransactionTestCase (not TestCase) because plain TestCase wraps each
+    test in a transaction that's rolled back at teardown, so fixtures created in
+    the test aren't actually committed -- a second thread's own DB connection
+    (used below to get request B a real, independent commit) wouldn't be able to
+    see them at all.
+
+    Roommate.objects.filter is patched so that the *first* call (request A's
+    "does this name already exist?" check) freezes its answer, then -- before
+    returning that answer to A -- drives a second, independent request B
+    through the *entire* view (its own lookup, its own create, its own commit)
+    on a separate thread with the real (unpatched) filter, and joins that
+    thread so B is fully finished before A resumes. Because B runs on its own
+    connection and is allowed to run to completion first, its commit is real
+    and durable -- rolling back A's later, failing transaction can't erase it,
+    which is what made an earlier, purely single-connection version of this
+    test flaky. Only after B has committed a "Carol" roommate does A see its
+    (now-stale) frozen answer of "no existing match" and proceed to attempt its
+    own create, deterministically reproducing the exact race in the issue:
+    both requests' lookups complete before either request's create commits.
+    """
+
+    def test_concurrent_join_same_new_name_creates_only_one_roommate(self):
+        household = Household.objects.create()
+
+        original_filter = Roommate.objects.filter
+        state = {"triggered": False, "response_b": None}
+
+        def racing_filter(*args, **kwargs):
+            if state["triggered"]:
+                # Later calls (e.g. request A's post-IntegrityError resume
+                # lookup) behave normally -- only the very first call races.
+                return original_filter(*args, **kwargs)
+            state["triggered"] = True
+
+            # Freeze request A's answer to what it genuinely was at this point:
+            # this is a brand-new household with no roommates yet, so "no match"
+            # (None), without actually issuing the read on this connection. A
+            # real SELECT here would leave connection A holding a SQLite
+            # shared-cache read lock on chores_roommate for as long as A's
+            # transaction stays open (it does, until A's create() below runs),
+            # which would block request B's INSERT on its own connection/thread
+            # with a "database table is locked" error unrelated to the actual
+            # bug under test.
+            frozen_first = None
+
+            # Run request B to completion, on its own thread/connection, and
+            # wait for it -- so its lookup, create and commit are all real and
+            # already durable by the time A is allowed to proceed.
+            def run_b():
+                with mock.patch.object(
+                    Roommate.objects, "filter", side_effect=original_filter
+                ):
+                    state["response_b"] = Client().post(
+                        "/join/", {"code": household.code, "name": "Carol"}
+                    )
+
+            thread = threading.Thread(target=run_b)
+            thread.start()
+            thread.join(timeout=10)
+
+            return _FrozenLookup(frozen_first)
+
+        with mock.patch.object(Roommate.objects, "filter", side_effect=racing_filter):
+            response_a = self.client.post(
+                "/join/", {"code": household.code, "name": "Carol"}
+            )
+
+        response_b = state["response_b"]
+        self.assertIsNotNone(response_b, "request B was never triggered")
+
+        for label, response in (("A", response_a), ("B", response_b)):
+            self.assertEqual(response.status_code, 200, msg=f"request {label} failed")
+            self.assertNotContains(response, "No household found")
+
+        self.assertEqual(Roommate.objects.filter(household=household).count(), 1)
+        roommate = Roommate.objects.get(household=household)
+        self.assertEqual(roommate.name, "Carol")

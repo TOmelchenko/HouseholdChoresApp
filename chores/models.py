@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Household(models.Model):
@@ -20,10 +21,20 @@ class Roommate(models.Model):
     household = models.ForeignKey(
         Household, on_delete=models.CASCADE, related_name="roommates"
     )
-    # Uniqueness within a household is enforced at the application layer (case-insensitive,
-    # trimmed matching in join_household), deliberately with no DB-level constraint — see #17/#18.
+    # Uniqueness within a household is primarily enforced at the application layer
+    # (case-insensitive, trimmed matching in join_household). The constraint below is a
+    # DB-level backstop against the narrow concurrent-join race (see #18) — it is
+    # case-insensitive (Lower(name)) so it also catches "Bob" vs "bob", unlike a plain
+    # unique_together which would rely on SQLite's case-sensitive default text collation.
     name = models.CharField(max_length=100)
     joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                "household", Lower("name"), name="unique_roommate_name_per_household_ci"
+            ),
+        ]
 
     def __str__(self):
         return self.name
