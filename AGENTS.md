@@ -39,6 +39,7 @@ paths):
 
 ```
 0 3 * * * cd /path/to/HouseholdChoresApp && /path/to/venv/bin/python manage.py assign_chores >> /path/to/HouseholdChoresApp/logs/assign_chores.log 2>&1
+0 5 * * * cd /path/to/HouseholdChoresApp && /path/to/venv/bin/python manage.py assign_chores >> /path/to/HouseholdChoresApp/logs/assign_chores.log 2>&1
 ```
 
 - `cd`s into the project root first so any relative-path assumptions in
@@ -51,6 +52,12 @@ paths):
 - The `logs/` directory must already exist before the first run — `>>`
   will not create missing directories, so `mkdir -p /path/to/HouseholdChoresApp/logs`
   once beforehand.
+- The second line is a same-day retry, ~2 hours after the primary 3am
+  run, unconditional and with no conditional shell logic. `assign_chores`
+  is per-(household, chore) idempotent — it only creates an `Assignment`
+  when one is actually due — so re-running it is a harmless no-op if the
+  3am run already succeeded, and recovers the day's missing assignments
+  if the 3am run crashed partway through.
 
 Conventions
 
