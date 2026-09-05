@@ -1,22 +1,22 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>My chores</title>
-  <style>
-    .overdue { color: red; font-weight: bold; }
-  </style>
-</head>
-<body>
-  <p>Logged in as <strong>{{ roommate.name }}</strong></p>
+{% extends "chores/base.html" %}
+
+{% block title %}My chores{% endblock %}
+
+{% block content %}
+  <p class="badge">Logged in as <strong>{{ roommate.name }}</strong></p>
   <h1>My chores</h1>
   {% if assignments %}
-    <ul>
+    <ul class="chore-list">
       {% for assignment in assignments %}
         <li{% if assignment.due_date < today %} class="overdue"{% endif %}>
-          {{ assignment.chore.name }} — due {{ assignment.due_date }}
-          {% if assignment.due_date < today %}<span class="overdue"> (Overdue)</span>{% endif %}
-          <form method="post" action="{% url 'complete_chore' assignment.id %}">
+          <span>
+            <span class="chore-name">{{ assignment.chore.name }}</span>
+            <span class="chore-due">
+              due {{ assignment.due_date }}
+              {% if assignment.due_date < today %}<span class="overdue-tag">(Overdue)</span>{% endif %}
+            </span>
+          </span>
+          <form class="inline" method="post" action="{% url 'complete_chore' assignment.id %}">
             {% csrf_token %}
             <button type="submit">Done</button>
           </form>
@@ -24,22 +24,21 @@
       {% endfor %}
     </ul>
   {% else %}
-    <p>No chores right now.</p>
+    <p class="empty-state">No chores right now.</p>
   {% endif %}
   {% if recently_completed %}
     <h2>Recently completed</h2>
-    <ul>
+    <ul class="chore-list">
       {% for assignment in recently_completed %}
         <li>
-          {{ assignment.chore.name }}
-          <form method="post" action="{% url 'undo_chore' assignment.id %}">
+          <span class="chore-name">{{ assignment.chore.name }}</span>
+          <form class="inline" method="post" action="{% url 'undo_chore' assignment.id %}">
             {% csrf_token %}
-            <button type="submit">Undo</button>
+            <button type="submit" class="btn-secondary">Undo</button>
           </form>
         </li>
       {% endfor %}
     </ul>
   {% endif %}
-  <p><a href="{% url 'chore_history' %}">View full history</a></p>
-</body>
-</html>
+  <p class="footer-link"><a href="{% url 'chore_history' %}">View full history</a></p>
+{% endblock %}

@@ -1,12 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Household Chores</title>
-</head>
-<body>
+{% extends "chores/base.html" %}
+
+{% block title %}Household Chores{% endblock %}
+
+{% block content %}
   <h1>Household Chores</h1>
-  <p><a href="{% url 'create_household' %}">Create household</a></p>
-  <p><a href="{% url 'join_household' %}">Join household</a></p>
-</body>
-</html>
+  <p style="color: var(--muted);">Fair chore rotation for your household — no accounts, just a shared code.</p>
+  <div class="actions">
+    <p><a class="btn" href="{% url 'create_household' %}">Create household</a></p>
+    <p><a class="btn btn-secondary" href="{% url 'join_household' %}">Join household</a></p>
+  </div>
+{% endblock %}

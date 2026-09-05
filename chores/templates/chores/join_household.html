@@ -1,13 +1,11 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Join household</title>
-</head>
-<body>
+{% extends "chores/base.html" %}
+
+{% block title %}Join household{% endblock %}
+
+{% block content %}
   <h1>Join a household</h1>
   {% if error %}
-    <p style="color: red;">{{ error }}</p>
+    <p class="error">{{ error }}</p>
   {% endif %}
   <form method="post">
     {% csrf_token %}
@@ -15,7 +13,8 @@
     <input id="code" name="code" type="text" required autofocus>
     <label for="name">Your name</label>
     <input id="name" name="name" type="text" required>
-    <button type="submit">Join household</button>
+    <div class="actions">
+      <button type="submit">Join household</button>
+    </div>
   </form>
-</body>
-</html>
+{% endblock %}
