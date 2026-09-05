@@ -39,3 +39,15 @@ Description: Build the main view and template that fetches all incomplete assign
 ## 10. Complete a chore
 Goal: Let a roommate mark a chore as done with one click.
 Description: Add a button to each chore row on the main view that POSTs to a completion endpoint, which sets `completed_at` on the `Assignment` row. The row should disappear from the list immediately (redirect after POST or minimal JS). No confirmation dialog. Write a test for the completion view.
+
+## 11. Add alerting/retry for failed scheduled assign_chores runs (GitHub #14)
+Goal: When the daily cron job (#12) fails, someone finds out and/or the run is retried, instead of the failure sitting silently in a log file nobody reads.
+Description: A mechanism notifies a human when a scheduled `assign_chores` run exits non-zero, and either retries automatically same-day at least once or documents why retry isn't appropriate. Use the smallest mechanism that gets a signal to a human (e.g. a webhook curl, transactional email) — not a new monitoring stack. Requires evaluating whether a new dependency/third-party service is justified; ask before adding one. Depends on #12 being in place.
+
+## 12. View full completed-chore history (GitHub #15)
+Goal: Let a roommate see chores they completed beyond the short undo window (#13), for visibility/record-keeping — no undo action attached.
+Description: Scope still TBD — split out of #13, which intentionally limits visibility of completed assignments to a short time window for the MVP. Needs grooming before implementation.
+
+## 13. Harden join_household against concurrent same-name join race (GitHub #18)
+Goal: Close the one remaining concurrency-only path by which two `Roommate` rows with the same case-insensitive, trimmed name could end up in the same household.
+Description: Two simultaneous POSTs to `/join/` with the same code and same new name should result in exactly one `Roommate` row, not two — the losing request should resume the winner's roommate, not crash. Low priority: this is a narrow race with no realistic exposure in the current single-process dev-oriented MVP (sequential-request duplication is already fully prevented, per #16/#17).
