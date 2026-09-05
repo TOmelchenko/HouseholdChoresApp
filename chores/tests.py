@@ -409,6 +409,181 @@ class MyChoresRecentlyCompletedTest(TestCase):
         self.assertLess(laundry_pos, dishes_pos)
 
 
+class ChoreHistoryViewTest(TestCase):
+    def setUp(self):
+        self.household = Household.objects.create()
+        self.roommate = Roommate.objects.create(household=self.household, name="Alice")
+        self.chore = Chore.objects.create(name="Dishes", frequency_days=1)
+
+    def _login(self, household=None, roommate=None):
+        household = household or self.household
+        roommate = roommate or self.roommate
+        session = self.client.session
+        session["household_id"] = household.id
+        session["roommate_id"] = roommate.id
+        session.save()
+
+    def test_no_session_redirects_to_index(self):
+        response = self.client.get("/chores/history/")
+        self.assertRedirects(response, "/")
+
+    def test_invalid_household_id_redirects_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = 9999
+        session["roommate_id"] = self.roommate.id
+        session.save()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_invalid_roommate_id_redirects_and_clears_session(self):
+        session = self.client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = 9999
+        session.save()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_roommate_household_mismatch_redirects_and_clears_session(self):
+        other_household = Household.objects.create()
+        other_roommate = Roommate.objects.create(household=other_household, name="Bob")
+        session = self.client.session
+        session["household_id"] = self.household.id
+        session["roommate_id"] = other_roommate.id
+        session.save()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertRedirects(response, "/")
+        session = self.client.session
+        self.assertNotIn("household_id", session)
+        self.assertNotIn("roommate_id", session)
+
+    def test_shows_logged_in_roommate_name(self):
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertContains(response, "Logged in as")
+        self.assertContains(response, "Alice")
+
+    def test_zero_completed_assignments_shows_empty_state(self):
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You haven't completed any chores yet.")
+
+    def test_completed_assignments_shown_with_fields_and_no_undo_button(self):
+        due_date = timezone.localdate()
+        completed_at = timezone.now()
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=due_date,
+            completed_at=completed_at,
+        )
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Dishes")
+        self.assertContains(response, str(due_date))
+        self.assertContains(response, completed_at.strftime("%Y-%m-%d %H:%M"))
+        self.assertNotContains(response, "Undo")
+        self.assertNotContains(response, "undo_chore")
+
+    def test_ordered_most_recently_completed_first(self):
+        older = Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now() - datetime.timedelta(days=2),
+        )
+        chore2 = Chore.objects.create(name="Laundry", frequency_days=7)
+        newer = Assignment.objects.create(
+            chore=chore2,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now() - datetime.timedelta(days=1),
+        )
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        content = response.content.decode()
+        laundry_pos = content.find("Laundry")
+        dishes_pos = content.find("Dishes")
+        self.assertLess(laundry_pos, dishes_pos)
+
+    def test_assignment_within_undo_window_still_appears(self):
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertContains(response, "Dishes")
+
+    def test_incomplete_assignment_not_shown(self):
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=self.roommate,
+            due_date=timezone.localdate(),
+        )
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertContains(response, "You haven't completed any chores yet.")
+
+    def test_other_roommates_completed_assignments_not_shown(self):
+        other_roommate = Roommate.objects.create(household=self.household, name="Bob")
+        Assignment.objects.create(
+            chore=self.chore,
+            roommate=other_roommate,
+            due_date=timezone.localdate(),
+            completed_at=timezone.now(),
+        )
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertContains(response, "You haven't completed any chores yet.")
+        self.assertNotContains(response, "Dishes")
+
+    def test_my_chores_links_to_history_always(self):
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "View full history")
+        self.assertContains(response, "/chores/history/")
+
+    def test_history_links_back_to_my_chores(self):
+        self._login()
+
+        response = self.client.get("/chores/history/")
+
+        self.assertContains(response, "Back to my chores")
+        self.assertContains(response, "/chores/")
+
+
 class UndoChoreViewTest(TestCase):
     def setUp(self):
         self.household = Household.objects.create()

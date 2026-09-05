@@ -69,6 +69,41 @@ def my_chores(request):
     )
 
 
+def chore_history(request):
+    household_id = request.session.get("household_id")
+    roommate_id = request.session.get("roommate_id")
+
+    if household_id is None or roommate_id is None:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    if not Household.objects.filter(id=household_id).exists():
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    try:
+        roommate = Roommate.objects.get(id=roommate_id, household_id=household_id)
+    except Roommate.DoesNotExist:
+        request.session.pop("household_id", None)
+        request.session.pop("roommate_id", None)
+        return redirect("index")
+
+    completed_assignments = Assignment.objects.filter(
+        roommate_id=roommate_id, completed_at__isnull=False
+    ).select_related("chore").order_by("-completed_at")
+
+    return render(
+        request,
+        "chores/chore_history.html",
+        {
+            "roommate": roommate,
+            "completed_assignments": completed_assignments,
+        },
+    )
+
+
 @require_POST
 def complete_chore(request, assignment_id):
     household_id = request.session.get("household_id")

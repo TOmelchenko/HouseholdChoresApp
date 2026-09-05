@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chore history</title>
+</head>
+<body>
+  <p>Logged in as <strong>{{ roommate.name }}</strong></p>
+  <h1>Chore history</h1>
+  {% if completed_assignments %}
+    <ul>
+      {% for assignment in completed_assignments %}
+        <li>
+          {{ assignment.chore.name }} — due {{ assignment.due_date }} — completed {{ assignment.completed_at|date:"Y-m-d H:i" }}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>You haven't completed any chores yet.</p>
+  {% endif %}
+  <p><a href="{% url 'my_chores' %}">Back to my chores</a></p>
+</body>
+</html>

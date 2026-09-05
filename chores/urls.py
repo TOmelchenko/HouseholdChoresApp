@@ -7,6 +7,7 @@ urlpatterns = [
     path("create/", views.create_household, name="create_household"),
     path("join/", views.join_household, name="join_household"),
     path("chores/", views.my_chores, name="my_chores"),
+    path("chores/history/", views.chore_history, name="chore_history"),
     path("chores/<int:assignment_id>/complete/", views.complete_chore, name="complete_chore"),
     path("chores/<int:assignment_id>/undo/", views.undo_chore, name="undo_chore"),
 ]
