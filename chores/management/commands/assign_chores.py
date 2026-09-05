@@ -29,7 +29,12 @@ class Command(BaseCommand):
         today = timezone.localdate()
         created_count = 0
 
-        chores = list(Chore.objects.all())
+        # Full deterministic chore ordering, used only to compute each
+        # chore's index `i` for the first-round distribution below. This is
+        # the full chore list, not the subset that happens to be due this
+        # run, so a chore's index (and therefore its first-ever assignee)
+        # never depends on which chores are due on any given day.
+        chores = list(Chore.objects.order_by("id"))
 
         for household in Household.objects.all():
             roommate_ids = list(
@@ -40,7 +45,7 @@ class Command(BaseCommand):
                 # an empty roommate_ids list (it would raise ValueError).
                 continue
 
-            for chore in chores:
+            for i, chore in enumerate(chores):
                 most_recent = (
                     Assignment.objects.filter(
                         chore=chore, roommate__household=household
@@ -71,7 +76,20 @@ class Command(BaseCommand):
                     .values_list("roommate_id", flat=True)
                 )
 
-                roommate_id = next_assignee(roommate_ids, history)
+                if not history and i > 0:
+                    # This (household, chore) pair has no real assignment
+                    # history yet, and this isn't the first chore in the
+                    # full ordering: seed next_assignee with a synthetic,
+                    # single-entry, in-memory-only history so the first
+                    # round of assignments is spread across roommates
+                    # instead of every chore's first assignment landing on
+                    # roommate_ids[0]. This synthetic entry is never
+                    # persisted (no Assignment row, no cache, no model
+                    # field) and is never combined with real history.
+                    seed_history = [roommate_ids[(i - 1) % len(roommate_ids)]]
+                    roommate_id = next_assignee(roommate_ids, seed_history)
+                else:
+                    roommate_id = next_assignee(roommate_ids, history)
 
                 Assignment.objects.create(
                     chore=chore,

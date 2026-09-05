@@ -118,7 +118,14 @@ class AssignChoresCommandTest(TestCase):
         call_command("assign_chores")
 
         self.assertEqual(Assignment.objects.count(), 2)
-        self.assertTrue(Assignment.objects.filter(chore=new_chore).exists())
+        new_assignment = Assignment.objects.get(chore=new_chore)
+        # Vacuum sorts to index 1 (Chore.objects.order_by("id")) after
+        # "Take out trash" (index 0), which already has real history from
+        # the first call_command above. Its own real history is still
+        # empty, so per the first-round distribution rule its first-ever
+        # assignment resolves to roommate_ids[1 % 2] == Bob, not Alice
+        # (the pre-#19 behavior of always landing on roommate_ids[0]).
+        self.assertEqual(new_assignment.roommate, self.bob)
 
     def test_two_households_with_same_chore_evaluated_independently(self):
         household_b = Household.objects.create()
@@ -188,3 +195,101 @@ class AssignChoresCommandTest(TestCase):
         help_text = Command.help
         self.assertIn("single run", help_text.lower())
         self.assertIn("12", help_text)
+
+    def test_first_round_distributes_across_roommates_with_wraparound(self):
+        # 3 roommates, ids in order [alice, bob, carol]. self.chore ("Take
+        # out trash") already exists from setUp; add a 3rd roommate and 3
+        # more chores (4 chores total, ordered A, B, C, D by id).
+        carol = Roommate.objects.create(household=self.household, name="Carol")
+        chore_b = Chore.objects.create(name="B", frequency_days=7)
+        chore_c = Chore.objects.create(name="C", frequency_days=7)
+        chore_d = Chore.objects.create(name="D", frequency_days=7)
+
+        call_command("assign_chores")
+
+        self.assertEqual(Assignment.objects.count(), 4)
+        self.assertEqual(
+            Assignment.objects.get(chore=self.chore).roommate, self.alice
+        )
+        self.assertEqual(Assignment.objects.get(chore=chore_b).roommate, self.bob)
+        self.assertEqual(Assignment.objects.get(chore=chore_c).roommate, carol)
+        # index 3 wraps: 3 % 3 == 0 -> back to alice.
+        self.assertEqual(Assignment.objects.get(chore=chore_d).roommate, self.alice)
+
+    def test_single_roommate_household_always_assigns_that_roommate(self):
+        # Remove Bob so this household has exactly one roommate.
+        self.bob.delete()
+        chore_b = Chore.objects.create(name="B", frequency_days=7)
+        chore_c = Chore.objects.create(name="C", frequency_days=7)
+
+        call_command("assign_chores")
+
+        self.assertEqual(Assignment.objects.count(), 3)
+        for chore in (self.chore, chore_b, chore_c):
+            self.assertEqual(
+                Assignment.objects.get(chore=chore).roommate, self.alice
+            )
+
+    def test_two_households_offset_independently(self):
+        # Household A (self.household): roommates [alice, bob].
+        # Household B: roommates [dave, erin, frank].
+        household_b = Household.objects.create()
+        dave = Roommate.objects.create(household=household_b, name="Dave")
+        erin = Roommate.objects.create(household=household_b, name="Erin")
+        frank = Roommate.objects.create(household=household_b, name="Frank")
+
+        # Global chore ordering: self.chore (index 0), a filler chore
+        # (index 1), then chore_index_2 (index 2) — the one we assert on.
+        Chore.objects.create(name="Filler", frequency_days=7)
+        chore_index_2 = Chore.objects.create(name="Sweep", frequency_days=7)
+
+        call_command("assign_chores")
+
+        # Household A: real history empty, i=2>0, seed=[roommate_ids[(2-1)%2]]
+        # = [roommate_ids[1]] = [bob]; next_assignee(ids, [bob]) advances
+        # past bob and wraps back to roommate_ids[0] = alice. (Equivalently:
+        # roommate_ids[i % len(roommate_ids)] = roommate_ids[2 % 2] = alice.)
+        self.assertEqual(
+            Assignment.objects.get(
+                chore=chore_index_2, roommate__household=self.household
+            ).roommate,
+            self.alice,
+        )
+        # Household B: index 2 -> roommate_ids[2 % 3] = roommate_ids[2] = frank.
+        self.assertEqual(
+            Assignment.objects.get(
+                chore=chore_index_2, roommate__household=household_b
+            ).roommate,
+            frank,
+        )
+        # Sanity: household B's own roommate count/order never affects
+        # household A's result, and vice versa (asserted implicitly above
+        # since each computed independently from its own roommate_ids).
+
+    def test_index_based_offset_is_stable_regardless_of_due_date_timing(self):
+        # Day 1: only 2 chores exist yet (index 0 and 1). They're due and
+        # get assigned to roommate_ids[0] and roommate_ids[1] respectively.
+        chore_b = Chore.objects.create(name="B", frequency_days=7)
+        call_command("assign_chores")
+
+        self.assertEqual(
+            Assignment.objects.get(chore=self.chore).roommate, self.alice
+        )
+        self.assertEqual(Assignment.objects.get(chore=chore_b).roommate, self.bob)
+
+        # Days later: chores at indices 2 and 3 are added to the global
+        # ordering (this household has no real assignment history for any
+        # of them), followed by the chore we care about at index 4.
+        Chore.objects.create(name="C", frequency_days=7)
+        Chore.objects.create(name="D", frequency_days=7)
+        chore_at_index_4 = Chore.objects.create(name="E", frequency_days=7)
+
+        call_command("assign_chores")
+
+        # Chore at index 4's first-ever assignment uses i == 4 ->
+        # roommate_ids[4 % 2] == roommate_ids[0] == alice — the same
+        # offset it would have gotten had it been due back on day 1,
+        # regardless of indices 2 and 3 having no real assignment either.
+        self.assertEqual(
+            Assignment.objects.get(chore=chore_at_index_4).roommate, self.alice
+        )
