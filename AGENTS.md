@@ -60,9 +60,15 @@ Conventions
 - Rotation logic lives as a pure function in `chores/rotation.py` with unit tests
 - No confirmation dialogs — actions are immediate
 - No custom chores, no effort scores, no swap flows (out of scope for MVP)
-- Session-based household identity (no user accounts)
+- Session-based household identity (no user accounts). Joining a household
+  with a name that already matches an existing roommate in that household
+  (case-insensitive, trimmed) resumes that roommate's session instead of
+  creating a duplicate — this is how a roommate recovers their identity
+  after losing their session (new device, cleared cookies, different
+  browser). Two different people sharing the same name in one household is
+  an accepted, known limitation (see #17).
 
 Rules
 
-- Dependencies are added in `pyproject.toml`. Do not add one without
-  asking
+- Dependencies are added in `requirements.txt` (this project has no
+  `pyproject.toml`). Do not add one without asking
