@@ -40,7 +40,9 @@ def my_chores(request):
         request.session.pop("roommate_id", None)
         return redirect("index")
 
-    if not Roommate.objects.filter(id=roommate_id, household_id=household_id).exists():
+    try:
+        roommate = Roommate.objects.get(id=roommate_id, household_id=household_id)
+    except Roommate.DoesNotExist:
         request.session.pop("household_id", None)
         request.session.pop("roommate_id", None)
         return redirect("index")
@@ -58,6 +60,7 @@ def my_chores(request):
         request,
         "chores/my_chores.html",
         {
+            "roommate": roommate,
             "assignments": assignments,
             "today": timezone.localdate(),
             "recently_completed": recently_completed,

@@ -11,5 +11,6 @@
   <h1>Welcome, {{ roommate.name }}!</h1>
   {% endif %}
   <p>You have joined household <strong>{{ household.code }}</strong>.</p>
+  <p><a href="{% url 'my_chores' %}">Go to my chores</a></p>
 </body>
 </html>

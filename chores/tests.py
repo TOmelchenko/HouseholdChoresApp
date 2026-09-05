@@ -118,6 +118,14 @@ class MyChoresViewTest(TestCase):
         self.assertNotIn("household_id", session)
         self.assertNotIn("roommate_id", session)
 
+    def test_shows_logged_in_roommate_name(self):
+        self._login()
+
+        response = self.client.get("/chores/")
+
+        self.assertContains(response, "Logged in as")
+        self.assertContains(response, "Alice")
+
     def test_zero_incomplete_assignments_shows_empty_state(self):
         self._login()
 
@@ -568,6 +576,10 @@ class CreateHouseholdViewTest(TestCase):
         response = self.client.post("/create/", {"name": "Bob"})
         self.assertContains(response, Household.objects.last().code)
 
+    def test_post_shows_link_to_my_chores(self):
+        response = self.client.post("/create/", {"name": "Alice"})
+        self.assertContains(response, 'href="/chores/"')
+
 
 class JoinHouseholdViewTest(TestCase):
     def setUp(self):
@@ -604,6 +616,10 @@ class JoinHouseholdViewTest(TestCase):
     def test_post_code_lookup_is_case_insensitive(self):
         response = self.client.post("/join/", {"code": self.household.code.lower(), "name": "Bob"})
         self.assertEqual(Roommate.objects.count(), 1)
+
+    def test_post_shows_link_to_my_chores(self):
+        response = self.client.post("/join/", {"code": self.household.code, "name": "Bob"})
+        self.assertContains(response, 'href="/chores/"')
 
     def test_post_with_matching_name_resumes_existing_roommate(self):
         existing = Roommate.objects.create(household=self.household, name="Bob")
