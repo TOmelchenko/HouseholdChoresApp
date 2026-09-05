@@ -146,6 +146,8 @@ def join_household(request):
             except Household.DoesNotExist:
                 error = "No household found with that code."
             else:
+                # Case-insensitive, trimmed match resumes the existing roommate instead of
+                # creating a duplicate identity; no DB-level uniqueness constraint (see #17/#18).
                 existing = Roommate.objects.filter(
                     household=household, name__iexact=name
                 ).order_by("id").first()
